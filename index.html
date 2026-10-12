@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#FFE45E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&display=swap" rel="stylesheet">
+<title>Vroumignon</title>
+<style>
+  :root {
+    --citron: #FFE45E; --pomme: #5BD66F; --foret: #083D2A;
+    --mandarine: #FF8A2B; --creme: #FFF8DC;
+    --ok: #0E7A44; --alerte: #B84A00;
+    --police: Fredoka, ui-rounded, "Hiragino Maru Gothic ProN", "Arial Rounded MT Bold", Nunito, system-ui, sans-serif;
+    --contour: .04em 0 0 var(--foret), -.04em 0 0 var(--foret), 0 .04em 0 var(--foret), 0 -.04em 0 var(--foret),
+               .03em .03em 0 var(--foret), -.03em .03em 0 var(--foret), .03em -.03em 0 var(--foret), -.03em -.03em 0 var(--foret);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background-color: var(--citron);
+    background-image:
+      radial-gradient(circle at 10% 16%, var(--pomme) 0 9vmin, transparent calc(9vmin + 1px)),
+      radial-gradient(circle at 92% 86%, var(--mandarine) 0 15vmin, transparent calc(15vmin + 1px)),
+      radial-gradient(circle at 90% 12%, var(--pomme) 0 5vmin, transparent calc(5vmin + 1px)),
+      radial-gradient(circle at 7% 90%, var(--mandarine) 0 6vmin, transparent calc(6vmin + 1px));
+    color: var(--foret);
+    font-family: var(--police);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 2rem; overflow: hidden;
+  }
+  #titre {
+    margin: 0 0 2rem;
+    font-size: min(13vw, 17vh); font-weight: 700; line-height: 1.05; color: #fff;
+    text-shadow: var(--contour), .07em .09em 0 var(--mandarine);
+    animation: rebond .8s cubic-bezier(.34, 1.56, .64, 1) both;
+  }
+  #demarrer, #unite {
+    font-family: var(--police); font-weight: 700; color: var(--foret); cursor: pointer;
+    border: 4px solid var(--foret); border-radius: 999px;
+    box-shadow: 0 .5rem 0 var(--foret);
+    transition: transform .12s, box-shadow .12s;
+  }
+  #demarrer { font-size: 2.2rem; padding: .8rem 2.6rem; background: var(--pomme); }
+  #unite { font-size: min(5vw, 6vh); padding: .1em 1em; background: var(--mandarine); box-shadow: 0 .3rem 0 var(--foret); }
+  #demarrer:active, #unite:active { transform: translateY(.3rem); box-shadow: 0 0 0 var(--foret); }
+  #demarrer:focus-visible, #unite:focus-visible { outline: 4px solid var(--foret); outline-offset: 4px; }
+
+  #affichage {
+    display: grid; grid-template-areas: "vit dir" "uni dir";
+    align-items: center; justify-items: center; column-gap: 6vw; row-gap: .8rem;
+    animation: rebond .6s cubic-bezier(.34, 1.56, .64, 1) both;
+  }
+  #vitesse {
+    grid-area: vit; font-size: min(24vw, 50vh); font-weight: 700; line-height: 1;
+    font-variant-numeric: tabular-nums; color: #fff;
+    text-shadow: var(--contour), .06em .08em 0 var(--mandarine);
+  }
+  #vitesse.pop { animation: pop .25s cubic-bezier(.34, 1.56, .64, 1); }
+  #unite { grid-area: uni; }
+
+  #direction {
+    --taille: min(22vw, 34vh);
+    grid-area: dir; position: relative; width: var(--taille); height: var(--taille);
+    border: calc(var(--taille) * .07) solid var(--foret); border-radius: 50%;
+    background: var(--creme); box-shadow: 0 .6rem 0 var(--mandarine);
+    color: #159A47;
+  }
+  #fleche { position: absolute; inset: 14%; width: 72%; height: 72%; transition: transform .25s cubic-bezier(.34, 1.56, .64, 1); }
+  #fleche path { stroke: var(--foret); stroke-width: 5; stroke-linejoin: round; }
+  #point { position: absolute; inset: 28%; border-radius: 50%; background: var(--mandarine); border: .35rem solid var(--foret); }
+  #direction.arret #fleche { display: none; }
+  #direction:not(.arret) #point { display: none; }
+  #direction.virage { color: var(--mandarine); }
+  #direction.recul { color: #FF4D3A; }
+  #direction.incertain { color: #8FB9A0; }
+
+  #statut {
+    margin-top: 1.8rem; padding: .5rem 1.4rem; font-size: min(3.2vw, 3.6vh); font-weight: 500;
+    background: var(--creme); border: 3px solid var(--foret); border-radius: 999px;
+  }
+  #statut.ok { color: var(--ok); }
+  #statut.alerte { color: var(--alerte); }
+  .cache { display: none !important; }
+
+  @media (max-aspect-ratio: 1/1) {
+    #affichage { grid-template-areas: "vit" "uni" "dir"; }
+    #vitesse { font-size: min(38vw, 30vh); }
+    #direction { --taille: min(30vw, 20vh); }
+  }
+  @keyframes rebond {
+    0% { transform: scale(.5) rotate(-6deg); opacity: 0; }
+    60% { transform: scale(1.08) rotate(2deg); opacity: 1; }
+    100% { transform: none; }
+  }
+  @keyframes pop { 0% { transform: scale(.92); } 60% { transform: scale(1.05); } 100% { transform: scale(1); } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+
+<h1 id="titre">Vroumignon</h1>
+<button id="demarrer" class="cache">Réessayer</button>
+
+<div id="affichage" class="cache">
+  <div id="vitesse">0</div>
+  <button id="unite" aria-label="Changer d'unité">km/h</button>
+  <div id="direction" role="img" aria-label="À l'arrêt">
+    <svg id="fleche" viewBox="0 0 100 100" aria-hidden="true"><path d="M50 6 L90 52 H63 V94 H37 V52 H10 Z" fill="currentColor"/></svg>
+    <div id="point"></div>
+  </div>
+</div>
+<div id="statut">Le compteur démarre dans 3 secondes…</div>
+
+<script>
+  const elVitesse = document.getElementById('vitesse');
+  const elUnite = document.getElementById('unite');
+  const elStatut = document.getElementById('statut');
+  const elBouton = document.getElementById('demarrer');
+  const elAffichage = document.getElementById('affichage');
+
+  let enMph = false;
+  let derniereVitesseMs = 0;
+  let dernierePosition = null;
+  let dernierCap = null;
+  let tauxLisse = 0; // degrés par seconde, > 0 = vers la droite
+  const elDirection = document.getElementById('direction');
+  const elFleche = document.getElementById('fleche');
+  elDirection.classList.add('arret');
+
+  // etat : 'arret' | 'avant' | 'droite' | 'gauche' | 'arriere' | 'incertain'
+  function afficherEtat(etat) {
+    const angles = { avant: 0, incertain: 0, droite: 90, gauche: -90, arriere: 180 };
+    const libelles = {
+      arret: "À l'arrêt", avant: 'Tout droit', incertain: 'En mouvement',
+      droite: 'Virage à droite', gauche: 'Virage à gauche', arriere: 'Marche arrière probable'
+    };
+    elDirection.className = etat === 'arret' ? 'arret'
+      : etat === 'droite' || etat === 'gauche' ? 'virage'
+      : etat === 'arriere' ? 'recul'
+      : etat === 'incertain' ? 'incertain' : '';
+    if (etat !== 'arret') elFleche.style.transform = 'rotate(' + angles[etat] + 'deg)';
+    elDirection.setAttribute('aria-label', libelles[etat]);
+  }
+  const SEUIL_VIRAGE = 5;     // °/s au-dessus duquel on considère qu'on tourne
+  const VITESSE_MIN_CAP = 2;  // m/s (≈ 7 km/h) : en dessous, le cap GPS est peu fiable
+
+  // ---- Détection (expérimentale) de la marche arrière ----
+  const AFFICHER_MARCHE_ARRIERE = true; // mettre false pour masquer cette info
+  const SEUIL_INVERSION = 150;   // degrés : écart de cap considéré comme une inversion brutale
+  const VITESSE_MAX_RECUL = 3;   // m/s (≈ 11 km/h) : au-dessus, on suppose marche avant
+  const DELAI_MAX = 30000;       // ms : après une pause plus longue, on repart de zéro
+  let marcheArriere = false;
+  let capRef = null, capRefTemps = 0, capCandidat = null, posAncre = null;
+
+  function ecartCap(a, b) {
+    let d = a - b;
+    if (d > 180) d -= 360;
+    if (d < -180) d += 360;
+    return Math.abs(d);
+  }
+
+  // Cap (0-360°) du point a vers le point b
+  function relevement(a, b) {
+    const rad = Math.PI / 180;
+    const dLon = (b.longitude - a.longitude) * rad;
+    const y = Math.sin(dLon) * Math.cos(b.latitude * rad);
+    const x = Math.cos(a.latitude * rad) * Math.sin(b.latitude * rad) -
+      Math.sin(a.latitude * rad) * Math.cos(b.latitude * rad) * Math.cos(dLon);
+    return (Math.atan2(y, x) / rad + 360) % 360;
+  }
+
+  function majMarcheArriere(v, pos) {
+    const pt = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+    let cap = pos.coords.heading;
+    const capValide = !(cap === null || Number.isNaN(cap));
+
+    if (v >= VITESSE_MAX_RECUL) {          // trop rapide pour reculer
+      marcheArriere = false;
+      capCandidat = null;
+      posAncre = pt;
+      if (capValide) { capRef = cap; capRefTemps = pos.timestamp; }
+      return;
+    }
+    if (v < 0.5) return;                   // à l'arrêt : on garde la référence
+
+    if (capValide) {
+      posAncre = pt;
+    } else {
+      // Pas de cap fourni : on le calcule si on a avancé d'au moins 3 m
+      cap = null;
+      if (!posAncre) { posAncre = pt; return; }
+      if (distance(posAncre, pt) < 3) return;
+      cap = relevement(posAncre, pt);
+      posAncre = pt;
+    }
+
+    if (capRef !== null && pos.timestamp - capRefTemps > DELAI_MAX) {
+      marcheArriere = false; capRef = null; capCandidat = null;
+    }
+    if (capRef === null) { capRef = cap; capRefTemps = pos.timestamp; return; }
+
+    if (capCandidat !== null) {
+      if (ecartCap(cap, capCandidat) < 60) {   // inversion confirmée par 2 mesures
+        marcheArriere = !marcheArriere;
+        capRef = cap; capRefTemps = pos.timestamp;
+      }
+      capCandidat = null;                      // sinon : fausse alerte, on ignore
+      return;
+    }
+    if (ecartCap(cap, capRef) > SEUIL_INVERSION) {
+      capCandidat = cap;                       // inversion suspecte, à confirmer
+    } else {
+      capRef = cap; capRefTemps = pos.timestamp;
+    }
+  }
+
+  function majDirection(v, pos, dt) {
+    if (AFFICHER_MARCHE_ARRIERE && marcheArriere && v >= 0.5) {
+      afficherEtat('arriere');
+      dernierCap = null;
+      tauxLisse = 0;
+      return;
+    }
+    const cap = pos.coords.heading;
+    if (v < VITESSE_MIN_CAP || cap === null || Number.isNaN(cap)) {
+      dernierCap = null;
+      tauxLisse = 0;
+      afficherEtat(v < 0.5 ? 'arret' : 'incertain');
+      return;
+    }
+    if (dernierCap !== null && dt > 0) {
+      let delta = cap - dernierCap;
+      if (delta > 180) delta -= 360;   // passage 359° -> 1°
+      if (delta < -180) delta += 360;
+      tauxLisse = 0.5 * tauxLisse + 0.5 * (delta / dt);
+    }
+    dernierCap = cap;
+    if (tauxLisse > SEUIL_VIRAGE) {
+      afficherEtat('droite');
+    } else if (tauxLisse < -SEUIL_VIRAGE) {
+      afficherEtat('gauche');
+    } else {
+      afficherEtat('avant');
+    }
+  }
+
+  function statut(texte, classe) {
+    elStatut.textContent = texte;
+    elStatut.className = classe || '';
+  }
+
+  function afficher() {
+    const valeur = enMph ? derniereVitesseMs * 2.23694 : derniereVitesseMs * 3.6;
+    const arrondi = Math.round(valeur);
+    if (elVitesse.textContent !== String(arrondi)) {
+      elVitesse.classList.remove('pop'); void elVitesse.offsetWidth; elVitesse.classList.add('pop');
+    }
+    elVitesse.textContent = arrondi;
+    elUnite.textContent = enMph ? 'mph' : 'km/h';
+  }
+
+  // Distance en mètres entre deux points GPS (formule de Haversine)
+  function distance(a, b) {
+    const R = 6371000, rad = Math.PI / 180;
+    const dLat = (b.latitude - a.latitude) * rad;
+    const dLon = (b.longitude - a.longitude) * rad;
+    const x = Math.sin(dLat / 2) ** 2 +
+      Math.cos(a.latitude * rad) * Math.cos(b.latitude * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(x));
+  }
+
+  function surPosition(pos) {
+    let v = pos.coords.speed; // en m/s, peut être null
+    if (v === null || Number.isNaN(v)) {
+      // Plan B : calcul à partir de la distance parcourue
+      if (dernierePosition) {
+        const dt = (pos.timestamp - dernierePosition.timestamp) / 1000;
+        if (dt > 0) v = distance(dernierePosition.coords, pos.coords) / dt;
+      }
+    }
+    const dt = dernierePosition ? (pos.timestamp - dernierePosition.timestamp) / 1000 : 0;
+    dernierePosition = pos;
+    if (v === null || Number.isNaN(v)) return;
+    derniereVitesseMs = v < 0.5 ? 0 : v; // ignore le bruit GPS à l'arrêt
+    afficher();
+    majMarcheArriere(derniereVitesseMs, pos);
+    majDirection(derniereVitesseMs, pos, dt);
+    elBouton.classList.add('cache');
+    statut('GPS actif · précision ' + Math.round(pos.coords.accuracy) + ' m', 'ok');
+  }
+
+  function surErreur(err) {
+    const messages = {
+      1: 'Localisation refusée. Autorisez-la pour ce site dans les réglages du navigateur.',
+      2: 'Position indisponible. Vérifiez la réception GPS.',
+      3: 'Le GPS met trop de temps à répondre.'
+    };
+    statut(messages[err.code] || 'Erreur de localisation.', 'alerte');
+    elBouton.classList.remove('cache'); // permet de réessayer
+  }
+
+  const DELAI_ACCUEIL = 3000; // ms avant de passer de l'accueil au compteur
+  let watchId = null;
+
+  function demarrer() {
+    if (!('geolocation' in navigator)) {
+      statut("La localisation n'est pas disponible dans ce navigateur.", 'alerte');
+      return;
+    }
+    elBouton.classList.add('cache');
+    document.getElementById('titre').classList.add('cache');
+    elAffichage.classList.remove('cache');
+    statut('Recherche du signal GPS…');
+    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    watchId = navigator.geolocation.watchPosition(surPosition, surErreur, {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 15000
+    });
+    // Garde l'écran allumé si le navigateur le permet
+    if ('wakeLock' in navigator) navigator.wakeLock.request('screen').catch(() => {});
+  }
+
+  elBouton.addEventListener('click', demarrer);
+  setTimeout(demarrer, DELAI_ACCUEIL);
+
+  elUnite.addEventListener('click', () => { enMph = !enMph; afficher(); });
+</script>
+</body>
+</html>
