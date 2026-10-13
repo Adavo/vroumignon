@@ -272,19 +272,48 @@
     return 2 * R * Math.asin(Math.sqrt(x));
   }
 
+  // ---- Filtre de Kalman sur la vitesse (anti-bruit GPS) ----
+  const ACCEL_MAX = 3;       // m/s² : accélération maximale réaliste (pour réagir vite aux vrais changements)
+  const SEUIL_DEPART = 1.0;  // m/s (≈ 3,6 km/h) : au-dessus, on considère qu'on roule
+  const SEUIL_ARRET = 0.5;   // m/s (≈ 1,8 km/h) : en dessous, on considère qu'on est à l'arrêt
+  let vEst = 0, pEst = 4;    // vitesse estimée et son incertitude (variance)
+  let enMouvement = false;
+
+  function kalman(z, precision, dt) {
+    // Incertitude de la mesure : plus la précision GPS est mauvaise, moins on lui fait confiance
+    const sigma = 0.3 + (Number.isFinite(precision) ? precision : 10) * 0.04;
+    const R = sigma * sigma;
+    // Prédiction : peu d'accélération attendue à l'arrêt, un peu plus en roulant
+    const q = vEst < 1 ? 0.2 : 0.8;
+    pEst += (q * dt) ** 2;
+    // Écart énorme par rapport à la prévision = vrai changement de vitesse : on réagit vite
+    if ((z - vEst) ** 2 > 9 * (pEst + R)) pEst += (ACCEL_MAX * dt) ** 2;
+    // Correction
+    const K = pEst / (pEst + R);
+    vEst += K * (z - vEst);
+    pEst *= (1 - K);
+    return vEst;
+  }
+
   function surPosition(pos) {
     let v = pos.coords.speed; // en m/s, peut être null
     if (v === null || Number.isNaN(v)) {
       // Plan B : calcul à partir de la distance parcourue
       if (dernierePosition) {
         const dt = (pos.timestamp - dernierePosition.timestamp) / 1000;
-        if (dt > 0) v = distance(dernierePosition.coords, pos.coords) / dt;
+        if (dt > 0) {
+          // on retire la part du déplacement imputable au bruit GPS (la précision)
+          const d = Math.max(0, distance(dernierePosition.coords, pos.coords) - 0.5 * (pos.coords.accuracy || 0));
+          v = d / dt;
+        }
       }
     }
     const dt = dernierePosition ? (pos.timestamp - dernierePosition.timestamp) / 1000 : 0;
     dernierePosition = pos;
     if (v === null || Number.isNaN(v)) return;
-    derniereVitesseMs = v < 0.5 ? 0 : v; // ignore le bruit GPS à l'arrêt
+    const vf = kalman(Math.max(0, v), pos.coords.accuracy, dt > 0 ? Math.min(dt, 5) : 1);
+    enMouvement = enMouvement ? vf >= SEUIL_ARRET : vf >= SEUIL_DEPART; // hystérésis
+    derniereVitesseMs = enMouvement ? vf : 0;
     afficher();
     majMarcheArriere(derniereVitesseMs, pos);
     majDirection(derniereVitesseMs, pos, dt);
