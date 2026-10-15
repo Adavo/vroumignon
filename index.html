@@ -149,7 +149,7 @@
   let dernierePosition = null;
   let dernierCap = null;
   let tauxLisse = 0; // degrés par seconde, > 0 = vers la droite
-  const VERSION = 'v7';
+  const VERSION = 'v8';
   const MODE_DEBUG = location.search.includes('debug');
   const elDebug = document.getElementById('debug');
   document.getElementById('version').textContent = VERSION;
@@ -160,7 +160,12 @@
   elDirection.classList.add('arret');
 
   // etat : 'arret' | 'avant' | 'droite' | 'gauche' | 'arriere' | 'incertain'
-  function afficherEtat(etat) {
+  let angleCourant = 0;
+  function versAngle(cible) {      // prend toujours le chemin le plus court (pas de tour complet)
+    angleCourant += deltaCap(cible, ((angleCourant % 360) + 360) % 360);
+    return angleCourant;
+  }
+  function afficherEtat(etat, angle) {
     const angles = { avant: 0, incertain: 0, droite: 90, gauche: -90, arriere: 180 };
     const libelles = {
       arret: "À l'arrêt", avant: 'Tout droit', incertain: 'En mouvement',
@@ -170,7 +175,7 @@
       : etat === 'droite' || etat === 'gauche' ? 'virage'
       : etat === 'arriere' ? 'recul'
       : etat === 'incertain' ? 'incertain' : '';
-    if (etat !== 'arret') elFleche.style.transform = 'rotate(' + angles[etat] + 'deg)';
+    if (etat !== 'arret') elFleche.style.transform = 'rotate(' + versAngle(angle !== undefined ? angle : angles[etat]) + 'deg)';
     elDirection.setAttribute('aria-label', libelles[etat]);
   }
   const SEUIL_VIRAGE = 5;     // °/s au-dessus duquel on considère qu'on tourne
@@ -224,7 +229,7 @@
         const fiable = verifsCap.filter(Boolean).length * 2 >= verifsCap.length;
         if (fiable !== capGpsFiable) {   // changement de source : on repart d'un historique vierge
           capGpsFiable = fiable;
-          histCaps = []; capRef = null; capCandidat = null;
+          histCaps = []; capDroit = null; capRef = null; capCandidat = null;
         }
       }
     }
@@ -268,36 +273,54 @@
     }
   }
 
-  // Virages : variation du cap sur une fenêtre glissante de quelques secondes
-  const FENETRE_CAP = 3000;   // ms
+  // Orientation : la flèche tourne de l'écart entre le cap actuel et le cap « tout droit ».
+  // Si le cap reste à peu près stable pendant quelques secondes, il devient le nouveau « tout droit ».
+  const FENETRE_STABLE = 5000;    // ms d'historique conservé
+  const DUREE_STABLE = 3000;      // ms : cap stable pendant au moins ce temps = nouveau « tout droit »
+  const TOLERANCE_STABLE = 8;     // degrés : variation maximale acceptée pour dire « stable »
+  const ZONE_MORTE = 6;           // degrés : en dessous, la flèche reste bien droite
+  const ANGLE_VIRAGE = 20;        // degrés : au-delà, la flèche passe en orange (virage)
   let histCaps = [];
-  let etatVirage = 'avant';
-  let tauxVirage = 0;         // °/s, > 0 = vers la droite
+  let capDroit = null;            // cap considéré comme « tout droit »
+  let capActuel = null;
+  let ecartDroit = 0;             // écart signé en degrés, > 0 = vers la droite
+
+  function moyenneCap(caps) {     // moyenne d'angles (gère le passage 359° -> 0°)
+    const rad = Math.PI / 180;
+    const x = caps.reduce((a, c) => a + Math.cos(c * rad), 0);
+    const y = caps.reduce((a, c) => a + Math.sin(c * rad), 0);
+    return (Math.atan2(y, x) / rad + 360) % 360;
+  }
 
   function majDirection(v, pos, mesure) {
     if (AFFICHER_MARCHE_ARRIERE && marcheArriere && v >= 0.5) {
       afficherEtat('arriere');
-      histCaps = [];
+      histCaps = []; capDroit = null;
       return;
     }
     if (v < VITESSE_MIN_CAP) {             // trop lent : le cap n'est pas fiable
-      histCaps = [];
-      tauxVirage = 0;
-      etatVirage = 'avant';
+      histCaps = []; capDroit = null; capActuel = null; ecartDroit = 0;
       afficherEtat(v < 0.5 ? 'arret' : 'incertain');
       return;
     }
-    if (mesure) histCaps.push({ t: pos.timestamp, cap: mesure.cap });
-    histCaps = histCaps.filter(e => pos.timestamp - e.t <= FENETRE_CAP);
-    if (histCaps.length < 2) { afficherEtat('incertain'); return; }  // pas encore de cap exploitable
-    const duree = (histCaps[histCaps.length - 1].t - histCaps[0].t) / 1000;
-    if (duree < 1.2) { afficherEtat(etatVirage); return; }
-    let somme = 0;
-    for (let i = 1; i < histCaps.length; i++) somme += deltaCap(histCaps[i].cap, histCaps[i - 1].cap);
-    tauxVirage = somme / duree;
-    const seuil = (etatVirage === 'droite' || etatVirage === 'gauche') ? SEUIL_VIRAGE * 0.6 : SEUIL_VIRAGE; // hystérésis
-    etatVirage = tauxVirage > seuil ? 'droite' : tauxVirage < -seuil ? 'gauche' : 'avant';
-    afficherEtat(etatVirage);
+    if (mesure) {
+      capActuel = mesure.cap;
+      histCaps.push({ t: pos.timestamp, cap: mesure.cap });
+    }
+    histCaps = histCaps.filter(e => pos.timestamp - e.t <= FENETRE_STABLE);
+    if (capActuel === null) { afficherEtat('incertain'); return; }   // aucun cap reçu pour l'instant
+    if (capDroit === null) capDroit = capActuel;   // premier cap : on suppose qu'on va tout droit
+
+    // Cap stable assez longtemps ? alors c'est la nouvelle direction « tout droit »
+    if (histCaps.length >= 2 && histCaps[histCaps.length - 1].t - histCaps[0].t >= DUREE_STABLE) {
+      const moy = moyenneCap(histCaps.map(e => e.cap));
+      if (histCaps.every(e => Math.abs(deltaCap(e.cap, moy)) <= TOLERANCE_STABLE)) capDroit = moy;
+    }
+
+    ecartDroit = deltaCap(capActuel, capDroit);
+    const angle = Math.abs(ecartDroit) < ZONE_MORTE ? 0 : ecartDroit;
+    const etat = Math.abs(ecartDroit) < ANGLE_VIRAGE ? 'avant' : (ecartDroit > 0 ? 'droite' : 'gauche');
+    afficherEtat(etat, angle);
   }
 
   function statut(texte, classe) {
@@ -383,7 +406,7 @@
         ' · cap utilisé ' + (mesure ? Math.round(mesure.cap) + '° (' + mesure.source + ')' : '—') +
         ' · cap calculé ' + (mesure && mesure.calc !== null ? Math.round(mesure.calc) + '°' : '—') +
         ' · GPS ' + (capGpsFiable ? 'cohérent' : 'incohérent') +
-        ' · virage ' + tauxVirage.toFixed(1) + '°/s' + '\n' +
+        ' · écart ' + Math.round(ecartDroit) + '° (tout droit ' + (capDroit === null ? '—' : Math.round(capDroit) + '°') + ')' + '\n' +
         'précision ' + Math.round(pos.coords.accuracy) + ' m · mesure n°' + nbMesures;
     }
     elBouton.classList.add('cache');
