@@ -149,7 +149,7 @@
   let dernierePosition = null;
   let dernierCap = null;
   let tauxLisse = 0; // degrés par seconde, > 0 = vers la droite
-  const VERSION = 'v8';
+  const VERSION = 'v9';
   const MODE_DEBUG = location.search.includes('debug');
   const elDebug = document.getElementById('debug');
   document.getElementById('version').textContent = VERSION;
@@ -275,9 +275,9 @@
 
   // Orientation : la flèche tourne de l'écart entre le cap actuel et le cap « tout droit ».
   // Si le cap reste à peu près stable pendant quelques secondes, il devient le nouveau « tout droit ».
-  const FENETRE_STABLE = 5000;    // ms d'historique conservé
-  const DUREE_STABLE = 3000;      // ms : cap stable pendant au moins ce temps = nouveau « tout droit »
-  const TOLERANCE_STABLE = 8;     // degrés : variation maximale acceptée pour dire « stable »
+  const FENETRE_STABLE = 6000;    // ms d'historique conservé
+  const DUREE_STABLE = 2000;      // ms : cap stable pendant au moins ce temps = nouveau « tout droit »
+  const TOLERANCE_STABLE = 10;    // degrés : variation maximale acceptée pour dire « stable »
   const ZONE_MORTE = 6;           // degrés : en dessous, la flèche reste bien droite
   const ANGLE_VIRAGE = 20;        // degrés : au-delà, la flèche passe en orange (virage)
   let histCaps = [];
@@ -311,10 +311,16 @@
     if (capActuel === null) { afficherEtat('incertain'); return; }   // aucun cap reçu pour l'instant
     if (capDroit === null) capDroit = capActuel;   // premier cap : on suppose qu'on va tout droit
 
-    // Cap stable assez longtemps ? alors c'est la nouvelle direction « tout droit »
-    if (histCaps.length >= 2 && histCaps[histCaps.length - 1].t - histCaps[0].t >= DUREE_STABLE) {
-      const moy = moyenneCap(histCaps.map(e => e.cap));
-      if (histCaps.every(e => Math.abs(deltaCap(e.cap, moy)) <= TOLERANCE_STABLE)) capDroit = moy;
+    // Cap stable depuis DUREE_STABLE ? alors c'est la nouvelle direction « tout droit ».
+    // On ne regarde que les dernières secondes (+ la mesure juste avant), pas tout l'historique.
+    const maint = pos.timestamp;
+    const recents = histCaps.filter(e => e.t >= maint - DUREE_STABLE);
+    const avant = histCaps.filter(e => e.t < maint - DUREE_STABLE).pop();
+    const couvre = recents.length > 0 && recents[0].t <= maint - DUREE_STABLE;
+    const lot = (!couvre && avant) ? [avant].concat(recents) : recents;
+    if (lot.length >= 2 && lot[0].t <= maint - DUREE_STABLE) {
+      const moy = moyenneCap(lot.map(e => e.cap));
+      if (lot.every(e => Math.abs(deltaCap(e.cap, moy)) <= TOLERANCE_STABLE)) capDroit = moy;
     }
 
     ecartDroit = deltaCap(capActuel, capDroit);
