@@ -104,6 +104,16 @@
     font: .9rem/1.3 monospace; white-space: pre-line; text-align: left; background: var(--creme);
     border: 2px solid var(--foret); border-radius: .6rem;
   }
+  #btnJournal {
+    position: fixed; left: 50%; bottom: .5rem; transform: translateX(-50%); padding: .3rem 1rem;
+    font: 700 1rem var(--police); background: var(--creme); color: var(--foret);
+    border: 2px solid var(--foret); border-radius: 999px; cursor: pointer;
+  }
+  #journal {
+    position: fixed; inset: 4%; margin: 0; padding: .8rem; overflow: auto; text-align: left;
+    font: .8rem/1.25 monospace; white-space: pre; background: var(--creme); color: var(--foret);
+    border: 3px solid var(--foret); border-radius: 1rem; z-index: 5;
+  }
   .cache { display: none !important; }
 
   @media (max-aspect-ratio: 1/1) {
@@ -135,6 +145,8 @@
 </div>
 <div id="version"></div>
 <div id="debug" class="cache"></div>
+<button id="btnJournal" class="cache">Journal</button>
+<pre id="journal" class="cache"></pre>
 <div id="statut">Le compteur démarre dans 3 secondes…</div>
 
 <script>
@@ -149,11 +161,22 @@
   let dernierePosition = null;
   let dernierCap = null;
   let tauxLisse = 0; // degrés par seconde, > 0 = vers la droite
-  const VERSION = 'v9';
+  const VERSION = 'v11';
   const MODE_DEBUG = location.search.includes('debug');
   const elDebug = document.getElementById('debug');
   document.getElementById('version').textContent = VERSION;
-  if (MODE_DEBUG) elDebug.classList.remove('cache');
+  const elBtnJournal = document.getElementById('btnJournal');
+  const elJournal = document.getElementById('journal');
+  const journal = [];
+  let t0Journal = null;
+  if (MODE_DEBUG) { elDebug.classList.remove('cache'); elBtnJournal.classList.remove('cache'); }
+  function afficherJournal() {
+    elJournal.textContent = 'Journal (40 dernières mesures) — touchez pour fermer\n' +
+      't(s) | vit brute>filtrée km/h | cap GPS | cap calc | écart | flèche\n' + journal.slice(-40).join('\n');
+    elJournal.scrollTop = elJournal.scrollHeight;
+  }
+  elBtnJournal.addEventListener('click', () => { afficherJournal(); elJournal.classList.remove('cache'); });
+  elJournal.addEventListener('click', () => elJournal.classList.add('cache'));
   let nbMesures = 0;
   const elDirection = document.getElementById('direction');
   const elFleche = document.getElementById('fleche');
@@ -182,7 +205,7 @@
   const VITESSE_MIN_CAP = 2;  // m/s (≈ 7 km/h) : en dessous, le cap GPS est peu fiable
 
   // ---- Détection (expérimentale) de la marche arrière ----
-  const AFFICHER_MARCHE_ARRIERE = true; // mettre false pour masquer cette info
+  const AFFICHER_MARCHE_ARRIERE = false; // false = désactivée (true = « marche arrière probable » affichée)
   const SEUIL_INVERSION = 150;   // degrés : écart de cap considéré comme une inversion brutale
   const VITESSE_MAX_RECUL = 3;   // m/s (≈ 11 km/h) : au-dessus, on suppose marche avant
   const DELAI_MAX = 30000;       // ms : après une pause plus longue, on repart de zéro
@@ -208,32 +231,18 @@
 
   // Cap du véhicule : fourni par le GPS, sinon calculé à partir des positions successives
   let ancreCap = null;
-  let verifsCap = [];          // derniers contrôles « cap GPS cohérent avec les positions ? »
-  let capGpsFiable = true;
-  function mesureCap(pos, v) {
+  function mesureCap(pos) {
     const pt = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
     const h = pos.coords.heading;
     const hValide = !(h === null || Number.isNaN(h));
-    // Cap calculé à partir des positions : sert de secours ET de contrôle du cap GPS
+    // Cap calculé à partir des positions : uniquement un plan B quand le GPS ne fournit pas de cap
     let calc = null;
     if (!ancreCap) ancreCap = pt;
     else if (distance(ancreCap, pt) >= Math.max(3, pos.coords.accuracy || 0)) {
       calc = relevement(ancreCap, pt);
       ancreCap = pt;
     }
-    // Contrôle : un cap GPS faux (bloqué, décalé…) ne colle pas avec la trajectoire réelle
-    if (hValide && calc !== null && v >= 2.5) {
-      verifsCap.push(ecartCap(h, calc) < 60);
-      if (verifsCap.length > 5) verifsCap.shift();
-      if (verifsCap.length >= 3) {
-        const fiable = verifsCap.filter(Boolean).length * 2 >= verifsCap.length;
-        if (fiable !== capGpsFiable) {   // changement de source : on repart d'un historique vierge
-          capGpsFiable = fiable;
-          histCaps = []; capDroit = null; capRef = null; capCandidat = null;
-        }
-      }
-    }
-    if (hValide && capGpsFiable) return { cap: h, source: 'GPS', calc: calc };
+    if (hValide) return { cap: h, source: 'GPS', calc: calc };
     if (calc !== null) return { cap: calc, source: 'calculé', calc: calc };
     return null;
   }
@@ -283,6 +292,8 @@
   let histCaps = [];
   let capDroit = null;            // cap considéré comme « tout droit »
   let capActuel = null;
+  const DELAI_OUBLI = 15000;      // ms d'arrêt avant d'oublier l'ancien « tout droit »
+  let tArret = null;
   let ecartDroit = 0;             // écart signé en degrés, > 0 = vers la droite
 
   function moyenneCap(caps) {     // moyenne d'angles (gère le passage 359° -> 0°)
@@ -298,13 +309,20 @@
       histCaps = []; capDroit = null;
       return;
     }
-    if (v < VITESSE_MIN_CAP) {             // trop lent : le cap n'est pas fiable
-      histCaps = []; capDroit = null; capActuel = null; ecartDroit = 0;
-      afficherEtat(v < 0.5 ? 'arret' : 'incertain');
+    if (v < 0.5) {                          // à l'arrêt
+      if (tArret === null) tArret = pos.timestamp;
+      if (pos.timestamp - tArret > DELAI_OUBLI) {   // arrêt long : on oublie l'ancien « tout droit »
+        histCaps = []; capDroit = null; capActuel = null; ecartDroit = 0;
+      }
+      afficherEtat('arret');
       return;
     }
-    if (mesure) {
-      capActuel = mesure.cap;
+    tArret = null;
+    // Très lent (< 7 km/h) : le cap GPS est peu fiable, on garde simplement l'affichage et la référence
+    const capFiable = v >= VITESSE_MIN_CAP;
+    if (mesure && capFiable) {
+      // lissage circulaire du cap (évite que la flèche tremble)
+      capActuel = (capActuel === null) ? mesure.cap : (capActuel + 0.6 * deltaCap(mesure.cap, capActuel) + 360) % 360;
       histCaps.push({ t: pos.timestamp, cap: mesure.cap });
     }
     histCaps = histCaps.filter(e => pos.timestamp - e.t <= FENETRE_STABLE);
@@ -318,7 +336,7 @@
     const avant = histCaps.filter(e => e.t < maint - DUREE_STABLE).pop();
     const couvre = recents.length > 0 && recents[0].t <= maint - DUREE_STABLE;
     const lot = (!couvre && avant) ? [avant].concat(recents) : recents;
-    if (lot.length >= 2 && lot[0].t <= maint - DUREE_STABLE) {
+    if (capFiable && lot.length >= 2 && lot[0].t <= maint - DUREE_STABLE) {
       const moy = moyenneCap(lot.map(e => e.cap));
       if (lot.every(e => Math.abs(deltaCap(e.cap, moy)) <= TOLERANCE_STABLE)) capDroit = moy;
     }
@@ -399,7 +417,7 @@
     derniereVitesseMs = enMouvement ? vf : 0;
     afficher();
     if (!enMouvement) ancreCap = null;   // à l'arrêt, on repart d'un point de départ neuf
-    const mesure = mesureCap(pos, derniereVitesseMs);
+    const mesure = mesureCap(pos);
     majMarcheArriere(derniereVitesseMs, pos, mesure);
     majDirection(derniereVitesseMs, pos, mesure);
     if (MODE_DEBUG) {
@@ -411,9 +429,16 @@
         'cap GPS ' + ((h === null || Number.isNaN(h)) ? 'null' : Math.round(h) + '°') +
         ' · cap utilisé ' + (mesure ? Math.round(mesure.cap) + '° (' + mesure.source + ')' : '—') +
         ' · cap calculé ' + (mesure && mesure.calc !== null ? Math.round(mesure.calc) + '°' : '—') +
-        ' · GPS ' + (capGpsFiable ? 'cohérent' : 'incohérent') +
         ' · écart ' + Math.round(ecartDroit) + '° (tout droit ' + (capDroit === null ? '—' : Math.round(capDroit) + '°') + ')' + '\n' +
         'précision ' + Math.round(pos.coords.accuracy) + ' m · mesure n°' + nbMesures;
+      if (t0Journal === null) t0Journal = pos.timestamp;
+      const f = x => (x === null || Number.isNaN(x)) ? '  n ' : String(Math.round(x)).padStart(4);
+      journal.push(((pos.timestamp - t0Journal) / 1000).toFixed(1).padStart(6) + ' | ' +
+        ((brute === null || Number.isNaN(brute)) ? '  n ' : (brute * 3.6).toFixed(0).padStart(4)) + '>' + (vf * 3.6).toFixed(0).padStart(3) +
+        ' | ' + f(pos.coords.heading) + ' | ' + (mesure && mesure.calc !== null ? f(mesure.calc) : '   -') +
+        ' | ' + String(Math.round(ecartDroit)).padStart(4) + ' | ' + elDirection.getAttribute('aria-label'));
+      if (journal.length > 400) journal.shift();
+      if (!elJournal.classList.contains('cache')) afficherJournal();
     }
     elBouton.classList.add('cache');
     statut('GPS actif · précision ' + Math.round(pos.coords.accuracy) + ' m', 'ok');
